@@ -12,6 +12,7 @@ import csv
 import json
 import re
 from collections import defaultdict
+from html import escape as html_escape
 from pathlib import Path
 
 import folium
@@ -529,22 +530,22 @@ LOCATION_COORDS = {
 }
 
 DISTRICT_COLORS = {
-    "ময়মনসিংহ": "#1f77b4",
-    "নেত্রকোনা": "#2ca02c",
-    "জামালপুর": "#ff7f0e",
-    "শেরপুর": "#9467bd",
-    "কিশোরগঞ্জ": "#d62728",
-    "টাঙ্গাইল": "#8c564b",
-    "গোপালগঞ্জ": "#5f9ea0",
-    "ঢাকা": "#006400",
-    "নরসিংদী": "#e377c2",
-    "মানিকগঞ্জ": "#17becf",
-    "ব্রাহ্মণবাড়ীয়া": "#7b68ee",
-    "ঠাকুরগাঁও": "#90ee90",
-    "বরিশাল": "#f5deb3",
-    "নোয়াখালী": "#a9a9a9",
-    "চাঁদপুর": "#808080",
-    "বিনাইদহ": "#333333",
+    "ময়মনসিংহ": "#6366f1",
+    "নেত্রকোনা": "#10b981",
+    "জামালপুর": "#f59e0b",
+    "শেরপুর": "#8b5cf6",
+    "কিশোরগঞ্জ": "#ef4444",
+    "টাঙ্গাইল": "#ec4899",
+    "গোপালগঞ্জ": "#14b8a6",
+    "ঢাকা": "#22c55e",
+    "নরসিংদী": "#f97316",
+    "মানিকগঞ্জ": "#06b6d4",
+    "ব্রাহ্মণবাড়ীয়া": "#a78bfa",
+    "ঠাকুরগাঁও": "#84cc16",
+    "বরিশাল": "#eab308",
+    "নোয়াখালী": "#64748b",
+    "চাঁদপুর": "#fb923c",
+    "বিনাইদহ": "#94a3b8",
 }
 
 
@@ -594,8 +595,8 @@ def _load_bangladesh_boundary():
         return json.load(f)
 
 
-def build_map(records):
-    """Build a Folium map from student records."""
+def build_map_for_embed(records):
+    """Build a Folium map suitable for iframe embedding."""
     location_students = defaultdict(list)
     missing = 0
     for rec in records:
@@ -609,8 +610,8 @@ def build_map(records):
     plotted = total - missing
 
     m = folium.Map(
-        location=[24.75, 90.40],
-        zoom_start=9,
+        location=[23.7, 90.35],
+        zoom_start=7,
         tiles="OpenStreetMap",
         control_scale=True,
         prefer_canvas=True,
@@ -692,49 +693,479 @@ def build_map(records):
         for loc, cnt in unmapped:
             print(f"  {loc} ({cnt} students)")
 
-    # Title banner
-    title_html = f"""
-    <div style="position:fixed;top:10px;left:50%;transform:translateX(-50%);
-         z-index:1000;background:white;padding:10px 20px;border-radius:8px;
-         box-shadow:0 2px 6px rgba(0,0,0,0.3);font-family:'Noto Sans Bengali',sans-serif;
-         font-size:16px;font-weight:bold;text-align:center;max-width:90vw;">
-        শহীদ সৈয়দ নজরুল ইসলাম কলেজ<br>
-        <span style="font-size:12px;font-weight:normal;">
-        সেশন ২০০৩-২০০৫ | বিজ্ঞান বিভাগ | মোট ছাত্র: {total} | ম্যাপে: {plotted}
-        </span>
-    </div>
+    # PostMessage listener for district filtering from outer page
+    filter_script = """
+    <script>
+    setTimeout(function(){
+      var mapObj;
+      for(var k in window){
+        try{if(window[k] instanceof L.Map){mapObj=window[k];break;}}catch(e){}
+      }
+      if(!mapObj)return;
+      var byDistrict={};
+      mapObj.eachLayer(function(layer){
+        if(layer instanceof L.CircleMarker && !(layer instanceof L.Circle)){
+          var tip=layer.getTooltip();
+          if(tip){
+            var text=typeof tip.getContent==='function'?tip.getContent():'';
+            var m=text.match(/,\\s*(.+?)\\s*\\(/);
+            if(m){var d=m[1];if(!byDistrict[d])byDistrict[d]=[];byDistrict[d].push(layer);}
+          }
+        }
+      });
+      window.addEventListener('message',function(e){
+        var d=e.data&&e.data.district;
+        var bounds=L.latLngBounds();
+        var has=false;
+        for(var dist in byDistrict){
+          byDistrict[dist].forEach(function(mk){
+            if(!d||d===dist){
+              if(!mapObj.hasLayer(mk))mapObj.addLayer(mk);
+              bounds.extend(mk.getLatLng());has=true;
+            }else{
+              if(mapObj.hasLayer(mk))mapObj.removeLayer(mk);
+            }
+          });
+        }
+        if(d&&has)mapObj.fitBounds(bounds,{padding:[40,40],maxZoom:12});
+        else if(!d)mapObj.setView([23.7,90.35],7);
+      });
+    },100);
+    </script>
     """
-    m.get_root().html.add_child(folium.Element(title_html))
+    m.get_root().html.add_child(folium.Element(filter_script))
 
-    # Legend
-    legend_items = "".join(
-        f'<div style="margin:2px 0;"><span style="display:inline-block;width:14px;height:14px;'
-        f'background:{color};border-radius:3px;margin-right:6px;vertical-align:middle;"></span>'
-        f'<span style="vertical-align:middle;font-size:12px;">{district}</span></div>'
-        for district, color in DISTRICT_COLORS.items()
-    )
-    legend_html = f"""
-    <div style="position:fixed;bottom:30px;right:10px;z-index:1000;background:white;
-         padding:10px;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.3);
-         font-family:'Noto Sans Bengali',sans-serif;max-height:300px;overflow-y:auto;">
-        <div style="font-size:13px;font-weight:bold;margin-bottom:4px;">জেলা</div>
-        {legend_items}
-    </div>
-    """
-    m.get_root().html.add_child(folium.Element(legend_html))
-
-    # Meta tags
+    # Fonts for popups (viewport already set by folium)
     head_html = """
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;700&display=swap" rel="stylesheet">
-    <meta property="og:title" content="SNC Science 2003-2005 - Student Map" />
-    <meta property="og:description" content="শহীদ সৈয়দ নজরুল ইসলাম কলেজ - ২০০৩-২০০৫ সেশনের বিজ্ঞান বিভাগের ছাত্রদের ম্যাপ" />
-    <meta property="og:type" content="website" />
     """
     m.get_root().header.add_child(folium.Element(head_html))
 
     return m
+
+
+def compute_statistics(records):
+    """Compute district/upazila counts, summary stats, and student lists."""
+    district_counts = defaultdict(int)
+    upazila_counts = defaultdict(int)
+    district_student_lists = defaultdict(list)
+    upazila_student_lists = defaultdict(list)
+    plotted = 0
+
+    for rec in records:
+        loc = rec["location"]
+        if loc is None:
+            continue
+        plotted += 1
+        upazila, district = loc
+        district_counts[district] += 1
+        upazila_counts[loc] += 1
+        entry = {"roll": rec["roll"], "name": rec["name"]}
+        district_student_lists[district].append(entry)
+        upazila_student_lists[loc].append(entry)
+
+    # Sort districts descending by count
+    district_sorted = sorted(district_counts.items(), key=lambda x: x[1], reverse=True)
+    district_labels = [d for d, _ in district_sorted]
+    district_values = [c for _, c in district_sorted]
+    district_colors = [DISTRICT_COLORS.get(d, "#94a3b8") for d in district_labels]
+
+    # All upazilas sorted descending
+    upazila_sorted = sorted(upazila_counts.items(), key=lambda x: x[1], reverse=True)
+    upazila_labels = [f"{up}, {dist}" for (up, dist), _ in upazila_sorted]
+    upazila_values = [c for _, c in upazila_sorted]
+    upazila_colors = [DISTRICT_COLORS.get(dist, "#94a3b8") for (_, dist), _ in upazila_sorted]
+
+    # Student lookup dicts for chart click interaction
+    district_students = {
+        dist: sorted(district_student_lists[dist], key=lambda s: s["roll"])
+        for dist in district_labels
+    }
+    upazila_students = {
+        f"{up}, {dist}": sorted(upazila_student_lists[(up, dist)], key=lambda s: s["roll"])
+        for (up, dist), _ in upazila_sorted
+    }
+
+    return {
+        "total": len(records),
+        "plotted": plotted,
+        "num_districts": len(district_counts),
+        "num_upazilas": len(upazila_counts),
+        "district_labels": district_labels,
+        "district_values": district_values,
+        "district_colors": district_colors,
+        "upazila_labels": upazila_labels,
+        "upazila_values": upazila_values,
+        "upazila_colors": upazila_colors,
+        "district_students": district_students,
+        "upazila_students": upazila_students,
+    }
+
+
+def build_full_page(map_html_escaped, stats):
+    """Build modern HTML page with hero, embedded map, interactive charts, and footer."""
+    import json as _json
+
+    district_labels_js = _json.dumps(stats["district_labels"], ensure_ascii=False)
+    district_values_js = _json.dumps(stats["district_values"])
+    district_colors_js = _json.dumps(stats["district_colors"])
+    upazila_labels_js = _json.dumps(stats["upazila_labels"], ensure_ascii=False)
+    upazila_values_js = _json.dumps(stats["upazila_values"])
+    upazila_colors_js = _json.dumps(stats["upazila_colors"])
+    district_students_js = _json.dumps(stats["district_students"], ensure_ascii=False)
+    upazila_students_js = _json.dumps(stats["upazila_students"], ensure_ascii=False)
+    num_upazilas = len(stats["upazila_labels"])
+
+    # Build district filter pills HTML
+    pills = [
+        '<button class="filter-pill active" data-district="">'
+        '<span class="pill-dot" style="background:linear-gradient(135deg,#6366f1,#10b981)"></span>সকল</button>'
+    ]
+    for label, color in zip(stats["district_labels"], stats["district_colors"]):
+        pills.append(
+            f'<button class="filter-pill" data-district="{label}">'
+            f'<span class="pill-dot" style="background:{color}"></span>{label}</button>'
+        )
+    filter_pills_html = "\n    ".join(pills)
+
+    return f'''<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>সৈনক | বিজ্ঞান ২০০৩-২০০৫</title>
+<meta property="og:title" content="SSNIC Science 2003-2005 — Student Map &amp; Stats"/>
+<meta property="og:description" content="শহীদ সৈয়দ নজরুল ইসলাম কলেজ, ময়মনসিংহ — ২০০৩-২০০৫ সেশনের বিজ্ঞান বিভাগের ছাত্রদের ইন্টারেক্টিভ ম্যাপ ও পরিসংখ্যান"/>
+<meta property="og:type" content="website"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>
+*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
+html{{scroll-behavior:smooth}}
+body{{font-family:'Noto Sans Bengali','Inter',system-ui,sans-serif;background:#f8fafc;color:#0f172a;line-height:1.7;overflow-x:hidden}}
+
+/* ── Hero ── */
+.hero{{position:relative;min-height:55vh;display:flex;align-items:center;justify-content:center;background:#0f172a;overflow:hidden;padding:clamp(2.5rem,6vw,4rem) 1.5rem}}
+.hero::before{{content:'';position:absolute;inset:-50%;background:radial-gradient(circle at 20% 50%,rgba(99,102,241,.3) 0%,transparent 50%),radial-gradient(circle at 80% 20%,rgba(16,185,129,.25) 0%,transparent 50%),radial-gradient(circle at 60% 80%,rgba(139,92,246,.2) 0%,transparent 50%),radial-gradient(circle at 40% 30%,rgba(236,72,153,.15) 0%,transparent 40%);animation:meshMove 12s ease-in-out infinite alternate}}
+@keyframes meshMove{{0%{{transform:translate(0,0) scale(1)}}33%{{transform:translate(-5%,3%) scale(1.05)}}66%{{transform:translate(3%,-2%) scale(.98)}}100%{{transform:translate(-2%,5%) scale(1.03)}}}}
+.hero-content{{position:relative;z-index:1;text-align:center;max-width:820px}}
+.badge{{display:inline-block;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.25);color:#a5b4fc;padding:.35rem 1.2rem;border-radius:100px;font-size:.82rem;font-weight:500;margin-bottom:1.4rem;letter-spacing:.02em}}
+.hero h1{{font-size:clamp(1.7rem,5vw,2.8rem);font-weight:700;color:#fff;margin-bottom:.25rem;line-height:1.3}}
+.hero-en{{font-size:clamp(.8rem,1.8vw,1rem);color:#94a3b8;font-weight:400;margin-bottom:.7rem;font-family:'Inter','Noto Sans Bengali',sans-serif}}
+.session-badge{{display:inline-flex;align-items:center;gap:.5rem;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);color:#cbd5e1;padding:.4rem 1.1rem;border-radius:10px;font-size:.88rem;margin-bottom:2rem}}
+.stat-cards{{display:flex;justify-content:center;gap:clamp(.7rem,2vw,1.2rem);flex-wrap:wrap}}
+.stat-card{{background:rgba(255,255,255,.06);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:clamp(.9rem,2vw,1.3rem) clamp(1.3rem,3vw,2rem);min-width:130px;transition:transform .2s,background .2s}}
+.stat-card:hover{{transform:translateY(-3px);background:rgba(255,255,255,.11)}}
+.stat-card .number{{font-size:clamp(1.8rem,4.5vw,2.8rem);font-weight:700;color:#fff;line-height:1.1}}
+.stat-card .label{{font-size:.82rem;color:#94a3b8;margin-top:.25rem;font-weight:400}}
+
+/* ── Sections ── */
+.section{{max-width:1100px;margin:0 auto;padding:clamp(2rem,5vw,3.5rem) 1.5rem}}
+.section-header{{text-align:center;margin-bottom:2rem}}
+.section-header h2{{font-size:clamp(1.2rem,3vw,1.7rem);font-weight:600;color:#0f172a;margin-bottom:.4rem}}
+.section-header p{{color:#64748b;font-size:.92rem}}
+.accent-line{{width:48px;height:3px;background:linear-gradient(90deg,#6366f1,#10b981);border-radius:2px;margin:.8rem auto 0}}
+
+/* ── Map ── */
+.district-filter{{display:flex;flex-wrap:wrap;justify-content:center;gap:.4rem;margin-bottom:1.2rem}}
+.filter-pill{{display:inline-flex;align-items:center;gap:.4rem;padding:.3rem .8rem;border:1px solid #e2e8f0;border-radius:100px;background:#fff;cursor:pointer;font-family:inherit;font-size:.8rem;color:#475569;transition:all .2s;white-space:nowrap}}
+.filter-pill:hover{{border-color:#94a3b8;background:#f8fafc}}
+.filter-pill.active{{background:#0f172a;color:#fff;border-color:#0f172a}}
+.filter-pill.active .pill-dot{{box-shadow:0 0 0 2px rgba(255,255,255,.4)}}
+.pill-dot{{width:10px;height:10px;border-radius:50%;flex-shrink:0}}
+.map-card{{border-radius:16px;overflow:hidden;box-shadow:0 4px 32px rgba(99,102,241,.1),0 1px 4px rgba(0,0,0,.04);border:1px solid #e2e8f0}}
+.map-card iframe{{width:100%;height:65vh;border:none;display:block}}
+
+/* ── Charts ── */
+.toggle-wrap{{display:flex;justify-content:center;margin-bottom:1.5rem}}
+.toggle-group{{display:inline-flex;background:#e2e8f0;border-radius:12px;padding:4px;gap:2px}}
+.toggle-btn{{padding:.55rem 1.6rem;border:none;background:transparent;border-radius:10px;cursor:pointer;font-family:inherit;font-size:.92rem;font-weight:500;color:#64748b;transition:all .25s ease}}
+.toggle-btn.active{{background:#fff;color:#0f172a;box-shadow:0 2px 8px rgba(0,0,0,.08)}}
+.toggle-btn:hover:not(.active){{color:#334155}}
+.chart-card{{background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.06);border:1px solid #e2e8f0;padding:clamp(1rem,2.5vw,1.5rem)}}
+.chart-meta{{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:.8rem;flex-wrap:wrap;gap:.3rem}}
+.chart-title{{font-size:1rem;font-weight:600;color:#334155}}
+.chart-hint{{font-size:.78rem;color:#94a3b8}}
+.chart-wrap{{position:relative;transition:height .35s ease}}
+
+/* ── Modal ── */
+.modal-overlay{{position:fixed;inset:0;background:rgba(15,23,42,.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1rem;opacity:0;pointer-events:none;transition:opacity .25s ease}}
+.modal-overlay.show{{opacity:1;pointer-events:auto}}
+.modal-content{{background:#fff;border-radius:20px;padding:1.8rem;max-width:480px;width:100%;max-height:80vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,.2);transform:translateY(12px) scale(.97);transition:transform .25s ease}}
+.modal-overlay.show .modal-content{{transform:translateY(0) scale(1)}}
+.modal-header{{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:.8rem}}
+.modal-header h3{{font-size:1.1rem;font-weight:600;color:#0f172a;line-height:1.4}}
+.modal-close{{background:#f1f5f9;border:none;width:34px;height:34px;border-radius:10px;cursor:pointer;font-size:1.2rem;color:#64748b;display:flex;align-items:center;justify-content:center;transition:background .15s;flex-shrink:0}}
+.modal-close:hover{{background:#e2e8f0}}
+.modal-count{{font-size:.85rem;color:#6366f1;font-weight:500;margin-bottom:.8rem}}
+.modal-list{{overflow-y:auto;flex:1}}
+.student-row{{display:flex;align-items:center;padding:.55rem 0;border-bottom:1px solid #f1f5f9;gap:.8rem}}
+.student-row:last-child{{border-bottom:none}}
+.student-roll{{background:#f1f5f9;color:#475569;font-size:.78rem;font-weight:600;padding:.15rem .55rem;border-radius:6px;min-width:40px;text-align:center;font-family:'Inter',monospace}}
+.student-name{{font-size:.92rem;color:#1e293b}}
+
+/* ── Footer ── */
+footer{{background:#0f172a;color:#94a3b8;padding:2rem 1.5rem;text-align:center;font-size:.82rem;line-height:1.8}}
+footer a{{color:#a5b4fc;text-decoration:none}}
+footer a:hover{{text-decoration:underline}}
+.footer-sep{{display:inline-block;width:40px;height:1px;background:#334155;vertical-align:middle;margin:0 .8rem}}
+
+/* ── Responsive ── */
+@media(max-width:768px){{
+  .hero{{min-height:auto;padding:2rem 1rem 2.5rem}}
+  .map-card iframe{{height:50vh}}
+  .section{{padding:2rem 1rem}}
+  .stat-card{{padding:.8rem 1.1rem;min-width:95px}}
+  .toggle-btn{{padding:.45rem 1.1rem;font-size:.85rem}}
+  .chart-card{{padding:1rem}}
+  .modal-content{{padding:1.3rem;border-radius:16px}}
+}}
+
+/* ── Fade-in animation ── */
+.fade-in{{opacity:0;transform:translateY(20px);transition:opacity .6s ease,transform .6s ease}}
+.fade-in.visible{{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+
+<!-- ═══ Hero ═══ -->
+<section class="hero">
+  <div class="hero-content">
+    <div class="badge">প্রতিষ্ঠা ১৯৯৯ &bull; ময়মনসিংহ &bull; EIIN 111910</div>
+    <h1>শহীদ সৈয়দ নজরুল ইসলাম কলেজ</h1>
+    <p class="hero-en">Shaheed Syed Nazrul Islam College, Mymensingh</p>
+    <div class="session-badge">
+      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 14l9-5-9-5-9 5 9 5z"/><path d="M12 14l6.16-3.42A12.08 12.08 0 0121 17.5C21 20 16.97 22 12 22s-9-2-9-4.5a12.08 12.08 0 012.84-6.92L12 14z"/></svg>
+      সেশন ২০০৩–২০০৫ &middot; বিজ্ঞান বিভাগ
+    </div>
+    <div class="stat-cards">
+      <div class="stat-card">
+        <div class="number" data-count="{stats["total"]}">0</div>
+        <div class="label">মোট ছাত্র</div>
+      </div>
+      <div class="stat-card">
+        <div class="number" data-count="{stats["plotted"]}">0</div>
+        <div class="label">ম্যাপে প্রদর্শিত</div>
+      </div>
+      <div class="stat-card">
+        <div class="number" data-count="{stats["num_districts"]}">0</div>
+        <div class="label">জেলা</div>
+      </div>
+      <div class="stat-card">
+        <div class="number" data-count="{stats["num_upazilas"]}">0</div>
+        <div class="label">উপজেলা</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Map ═══ -->
+<section class="section fade-in">
+  <div class="section-header">
+    <h2>বন্ধুদের অবস্থান</h2>
+    <p>মার্কারে ক্লিক করে বিস্তারিত দেখুন</p>
+    <div class="accent-line"></div>
+  </div>
+  <div class="district-filter" id="districtFilter">
+    {filter_pills_html}
+  </div>
+  <div class="map-card">
+    <iframe srcdoc="{map_html_escaped}" title="Student Location Map" loading="lazy" id="mapIframe"></iframe>
+  </div>
+</section>
+
+<!-- ═══ Charts ═══ -->
+<section class="section fade-in">
+  <div class="section-header">
+    <h2>ছাত্র পরিসংখ্যান</h2>
+    <p>জেলা ও উপজেলা অনুযায়ী বিতরণ</p>
+    <div class="accent-line"></div>
+  </div>
+  <div class="toggle-wrap">
+    <div class="toggle-group">
+      <button class="toggle-btn active" data-view="district">জেলা</button>
+      <button class="toggle-btn" data-view="upazila">উপজেলা</button>
+    </div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-meta">
+      <span class="chart-title" id="chartTitle">জেলা অনুযায়ী ছাত্র সংখ্যা</span>
+      <span class="chart-hint" id="chartHint">বারে ক্লিক করে ছাত্রদের তালিকা দেখুন</span>
+    </div>
+    <div class="chart-wrap" id="chartWrap">
+      <canvas id="mainChart"></canvas>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Modal ═══ -->
+<div class="modal-overlay" id="studentModal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3 id="modalTitle"></h3>
+      <button class="modal-close" id="modalCloseBtn" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-count" id="modalCount"></div>
+    <div class="modal-list" id="modalList"></div>
+  </div>
+</div>
+
+<!-- ═══ Footer ═══ -->
+<footer>
+  শহীদ সৈয়দ নজরুল ইসলাম কলেজ, ময়মনসিংহ
+  <span class="footer-sep"></span>
+  সেশন ২০০৩–২০০৫ ভর্তি তালিকা থেকে সংগৃহীত
+  <br>
+  ম্যাপে প্রদর্শিত {stats["plotted"]}/{stats["total"]} জন
+  &nbsp;&middot;&nbsp;
+  <a href="https://ssnic.edu.bd" target="_blank" rel="noopener">ssnic.edu.bd</a>
+</footer>
+
+<script>
+(function(){{
+/* ── Data ── */
+const D={{labels:{district_labels_js},values:{district_values_js},colors:{district_colors_js}}};
+const U={{labels:{upazila_labels_js},values:{upazila_values_js},colors:{upazila_colors_js}}};
+const dStudents={district_students_js};
+const uStudents={upazila_students_js};
+const total={stats["plotted"]};
+
+/* ── Chart state ── */
+let chart=null, view='district';
+
+function render(v){{
+  view=v;
+  const wrap=document.getElementById('chartWrap');
+  const canvas=document.getElementById('mainChart');
+  if(chart)chart.destroy();
+
+  const isD=v==='district';
+  const src=isD?D:U;
+  const barH=isD?40:30;
+  wrap.style.height=(src.labels.length*barH+60)+'px';
+
+  document.getElementById('chartTitle').textContent=isD?'জেলা অনুযায়ী ছাত্র সংখ্যা':'উপজেলা অনুযায়ী ছাত্র সংখ্যা';
+  document.getElementById('chartHint').textContent='বারে ক্লিক করে ছাত্রদের তালিকা দেখুন';
+
+  chart=new Chart(canvas,{{
+    type:'bar',
+    data:{{
+      labels:src.labels,
+      datasets:[{{
+        data:src.values,
+        backgroundColor:src.colors.map(c=>c+'cc'),
+        hoverBackgroundColor:src.colors,
+        borderRadius:6,
+        barThickness:isD?28:22
+      }}]
+    }},
+    options:{{
+      indexAxis:'y',
+      responsive:true,
+      maintainAspectRatio:false,
+      onClick:function(evt,els){{
+        if(!els.length)return;
+        const idx=els[0].index;
+        const label=src.labels[idx];
+        const s=isD?dStudents[label]:uStudents[label];
+        if(s)showModal(label,s);
+      }},
+      plugins:{{
+        legend:{{display:false}},
+        tooltip:{{
+          backgroundColor:'#1e293b',
+          titleFont:{{family:"'Noto Sans Bengali'"}},
+          bodyFont:{{family:"'Noto Sans Bengali'"}},
+          padding:10,
+          cornerRadius:8,
+          callbacks:{{
+            label:function(ctx){{
+              const v2=ctx.parsed.x;
+              return ' '+v2+' জন ('+((v2/total)*100).toFixed(1)+'%)';
+            }}
+          }}
+        }}
+      }},
+      scales:{{
+        x:{{beginAtZero:true,grid:{{color:'#f1f5f9'}},ticks:{{color:'#94a3b8',font:{{family:"'Inter'"}}}}}},
+        y:{{grid:{{display:false}},ticks:{{color:'#334155',font:{{family:"'Noto Sans Bengali'",size:isD?13:11}}}}}}
+      }},
+      onHover:function(evt,els){{evt.native.target.style.cursor=els.length?'pointer':'default'}}
+    }}
+  }});
+}}
+
+/* ── Toggle ── */
+document.querySelectorAll('.toggle-btn').forEach(function(btn){{
+  btn.addEventListener('click',function(){{
+    document.querySelectorAll('.toggle-btn').forEach(function(b){{b.classList.remove('active')}});
+    btn.classList.add('active');
+    render(btn.dataset.view);
+  }});
+}});
+
+/* ── Modal ── */
+function showModal(title,students){{
+  document.getElementById('modalTitle').textContent=title;
+  document.getElementById('modalCount').textContent='মোট: '+students.length+' জন';
+  var html='';
+  for(var i=0;i<students.length;i++){{
+    html+='<div class="student-row"><span class="student-roll">'+students[i].roll+'</span><span class="student-name">'+students[i].name+'</span></div>';
+  }}
+  document.getElementById('modalList').innerHTML=html;
+  document.getElementById('studentModal').classList.add('show');
+  document.body.style.overflow='hidden';
+}}
+function closeModal(){{
+  document.getElementById('studentModal').classList.remove('show');
+  document.body.style.overflow='';
+}}
+document.getElementById('studentModal').addEventListener('click',function(e){{if(e.target===e.currentTarget)closeModal()}});
+document.getElementById('modalCloseBtn').addEventListener('click',closeModal);
+document.addEventListener('keydown',function(e){{if(e.key==='Escape')closeModal()}});
+
+/* ── Counter animation ── */
+document.querySelectorAll('[data-count]').forEach(function(el){{
+  var target=parseInt(el.dataset.count);
+  var start=performance.now();
+  var dur=1200;
+  function tick(now){{
+    var p=Math.min((now-start)/dur,1);
+    var ease=1-Math.pow(1-p,3);
+    el.textContent=Math.floor(ease*target);
+    if(p<1)requestAnimationFrame(tick);
+    else el.textContent=target;
+  }}
+  requestAnimationFrame(tick);
+}});
+
+/* ── Fade-in on scroll ── */
+var obs=new IntersectionObserver(function(entries){{
+  entries.forEach(function(e){{if(e.isIntersecting){{e.target.classList.add('visible');obs.unobserve(e.target)}}}});
+}},{{threshold:0.1}});
+document.querySelectorAll('.fade-in').forEach(function(el){{obs.observe(el)}});
+
+/* ── District filter → map ── */
+var mapIframe=document.getElementById('mapIframe');
+document.getElementById('districtFilter').addEventListener('click',function(e){{
+  var pill=e.target.closest('.filter-pill');
+  if(!pill)return;
+  document.querySelectorAll('.filter-pill').forEach(function(p){{p.classList.remove('active')}});
+  pill.classList.add('active');
+  var d=pill.dataset.district;
+  if(mapIframe&&mapIframe.contentWindow){{
+    mapIframe.contentWindow.postMessage({{district:d||null}},'*');
+  }}
+}});
+
+/* ── Init ── */
+render('district');
+}})();
+</script>
+</body>
+</html>'''
 
 
 def main():
@@ -770,10 +1201,13 @@ def main():
             writer.writerow([r["roll"], r["name"], upazila, district])
     print(f"CSV saved to: {CSV_PATH}")
 
-    # Build and save map
-    m = build_map(records)
-    m.save(str(OUTPUT_PATH))
-    print(f"Map saved to: {OUTPUT_PATH}")
+    # Build full page with embedded map and charts
+    m = build_map_for_embed(records)
+    map_html_escaped = html_escape(m.get_root().render(), quote=True)
+    stats = compute_statistics(records)
+    full_page = build_full_page(map_html_escaped, stats)
+    OUTPUT_PATH.write_text(full_page, encoding="utf-8")
+    print(f"Page saved to: {OUTPUT_PATH}")
 
 
 if __name__ == "__main__":
