@@ -9,6 +9,7 @@ The PDF uses SutonnyMJ (Bijoy) font encoding, so text must be converted to Unico
 """
 
 import csv
+import json
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -458,6 +459,7 @@ ROLL_OVERRIDES = {
 # Constants
 # ──────────────────────────────────────────────────────────────────────────────
 
+BD_BOUNDARY_PATH = Path(__file__).parent / "bd_boundary.json"
 PDF_PATH = Path(__file__).parent / "snc.pdf"
 OUTPUT_PATH = Path(__file__).parent / "index.html"
 CSV_PATH = Path(__file__).parent / "students.csv"
@@ -586,6 +588,12 @@ def extract_records(pdf_path):
     return records
 
 
+def _load_bangladesh_boundary():
+    """Load detailed Bangladesh boundary (1513 points, 17 polygons)."""
+    with open(BD_BOUNDARY_PATH) as f:
+        return json.load(f)
+
+
 def build_map(records):
     """Build a Folium map from student records."""
     location_students = defaultdict(list)
@@ -608,29 +616,17 @@ def build_map(records):
         prefer_canvas=True,
     )
 
-    # Mask everything outside Bangladesh with a dark overlay
-    bangladesh_boundary = [
-        [92.672721,22.041239],[92.652257,21.324048],[92.303234,21.475485],
-        [92.368554,20.670883],[92.082886,21.192195],[92.025215,21.70157],
-        [91.834891,22.182936],[91.417087,22.765019],[90.496006,22.805017],
-        [90.586957,22.392794],[90.272971,21.836368],[89.847467,22.039146],
-        [89.70205,21.857116],[89.418863,21.966179],[89.031961,22.055708],
-        [88.876312,22.879146],[88.52977,23.631142],[88.69994,24.233715],
-        [88.084422,24.501657],[88.306373,24.866079],[88.931554,25.238692],
-        [88.209789,25.768066],[88.563049,26.446526],[89.355094,26.014407],
-        [89.832481,25.965082],[89.920693,25.26975],[90.872211,25.132601],
-        [91.799596,25.147432],[92.376202,24.976693],[91.915093,24.130414],
-        [91.46773,24.072639],[91.158963,23.503527],[91.706475,22.985264],
-        [91.869928,23.624346],[92.146035,23.627499],[92.672721,22.041239],
-    ]
-    # World outer ring [lng, lat], Bangladesh hole reversed for GeoJSON winding
+    # Mask everything outside Bangladesh with a white overlay
+    # Uses detailed 1513-point boundary from geoBoundaries ADM0 (CC BY 4.0)
+    bd_polys = _load_bangladesh_boundary()
     world_ring = [[-180, -90], [180, -90], [180, 90], [-180, 90], [-180, -90]]
-    bd_hole = list(reversed(bangladesh_boundary))
+    # Each Bangladesh polygon becomes a hole in the world polygon
+    holes = [list(reversed(poly)) for poly in bd_polys]
     mask_geojson = {
         "type": "Feature",
         "geometry": {
             "type": "Polygon",
-            "coordinates": [world_ring, bd_hole],
+            "coordinates": [world_ring] + holes,
         },
     }
     folium.GeoJson(
