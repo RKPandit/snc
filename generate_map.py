@@ -632,8 +632,8 @@ def build_map(records):
     folium.GeoJson(
         mask_geojson,
         style_function=lambda x: {
-            "fillColor": "#ffffff",
-            "fillOpacity": 1.0,
+            "fillColor": "#000000",
+            "fillOpacity": 0.3,
             "color": "#2ca02c",
             "weight": 2,
         },
