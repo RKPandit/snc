@@ -449,6 +449,11 @@ RAW_ADDRESS_MAP = {
     '': None,
 }
 
+# Roll-specific overrides (corrections to PDF address data)
+ROLL_OVERRIDES = {
+    163: ("আটপাড়া", "নেত্রকোনা"),
+}
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Constants
 # ──────────────────────────────────────────────────────────────────────────────
@@ -565,7 +570,7 @@ def extract_records(pdf_path):
                 address_raw = (row[3] or "").strip()
 
                 name = bijoy_to_unicode(name_raw)
-                location = RAW_ADDRESS_MAP.get(address_raw)
+                location = ROLL_OVERRIDES.get(roll, RAW_ADDRESS_MAP.get(address_raw))
 
                 # If not found in lookup, try to handle unknown addresses
                 if location is None and address_raw and address_raw not in RAW_ADDRESS_MAP:
